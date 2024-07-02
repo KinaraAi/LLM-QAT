@@ -206,28 +206,36 @@ class LlamaMLP(nn.Module):
     ):
         self.w_bits = config.w_bits
         self.a_bits = config.a_bits
+        self.quant_strategy = config.quant_strategy
+        self.groupsize = config.group_size
         super().__init__()
         self.gate_proj = QuantizeLinear(
             hidden_size,
             intermediate_size,
             bias=False,
-            w_bits=self.w_bits,
+            w_bits=self.w_bits if "gate_proj-n_bits" not in self.quant_strategy else self.quant_strategy["gate_proj-n_bits"],
             a_bits=self.a_bits,
+            group_size = self.groupsize if "gate_proj-group_size" not in self.quant_strategy else self.quant_strategy["gate_proj-group_size"]
         )
+        print("Quanized gate_proj weights to {} group_size: {}".format(self.gate_proj.w_bits, self.gate_proj.group_size))
         self.down_proj = QuantizeLinear(
             intermediate_size,
             hidden_size,
             bias=False,
-            w_bits=self.w_bits,
+            w_bits=self.w_bits if "down_proj-n_bits" not in self.quant_strategy else self.quant_strategy["down_proj-n_bits"],
             a_bits=self.a_bits,
+            group_size = self.groupsize if "down_proj-group_size" not in self.quant_strategy else self.quant_strategy["down_proj-group_size"]
         )
+        print("Quanized down_proj weights to {} group_size: {}".format(self.down_proj.w_bits, self.down_proj.group_size))
         self.up_proj = QuantizeLinear(
             hidden_size,
             intermediate_size,
             bias=False,
-            w_bits=self.w_bits,
+            w_bits=self.w_bits if "up_proj-n_bits" not in self.quant_strategy else self.quant_strategy["up_proj-n_bits"],
             a_bits=self.a_bits,
+            group_size = self.groupsize if "up_proj-group_size" not in self.quant_strategy else self.quant_strategy["up_proj-group_size"]
         )
+        print("Quanized up_proj weights to {} group_size: {}".format(self.up_proj.w_bits, self.up_proj.group_size))
 
         self.act_fn = ACT2FN[hidden_act]
 
@@ -247,46 +255,56 @@ class LlamaAttention(nn.Module):
         self.max_position_embeddings = config.max_position_embeddings
         self.w_bits = config.w_bits
         self.a_bits = config.a_bits
-
+        self.quant_strategy = config.quant_strategy
         self.act_clip_val_k = torch.tensor([-2.0, 2.0])
         self.act_clip_val_v = torch.tensor([-2.0, 2.0])
         self.act_quantizer_k = SymQuantizer
         self.act_quantizer_v = SymQuantizer
         self.kv_bits = config.kv_bits
+        self.groupsize = config.group_size
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
                 f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
                 f" and `num_heads`: {self.num_heads})."
             )
+        print(self.quant_strategy)
         self.q_proj = QuantizeLinear(
             self.hidden_size,
             self.num_heads * self.head_dim,
-            bias=False,
-            w_bits=self.w_bits,
+            bias=True,
+            w_bits=self.w_bits if "q_proj-n_bits" not in self.quant_strategy else self.quant_strategy["q_proj-n_bits"],
             a_bits=self.a_bits,
+            group_size = self.groupsize if "q_proj-group_size" not in self.quant_strategy else self.quant_strategy["q_proj-group_size"]
         )
+        print("Quanized q_proj weights to {} group_size: {}".format(self.q_proj.w_bits, self.q_proj.group_size))
         self.k_proj = QuantizeLinear(
             self.hidden_size,
             self.num_heads * self.head_dim,
-            bias=False,
-            w_bits=self.w_bits,
+            bias=True,
+            w_bits=self.w_bits if "k_proj-n_bits" not in self.quant_strategy else self.quant_strategy["k_proj-n_bits"],
             a_bits=self.a_bits,
+            group_size = self.groupsize if "k_proj-group_size" not in self.quant_strategy else self.quant_strategy["k_proj-group_size"]
         )
+        print("Quanized k_proj weights to {} group_size: {}".format(self.k_proj.w_bits, self.k_proj.group_size))
         self.v_proj = QuantizeLinear(
             self.hidden_size,
             self.num_heads * self.head_dim,
-            bias=False,
-            w_bits=self.w_bits,
+            bias=True,
+            w_bits=self.w_bits if "v_proj-n_bits" not in self.quant_strategy else self.quant_strategy["v_proj-n_bits"],
             a_bits=self.a_bits,
+            group_size = self.groupsize if "v_proj-group_size" not in self.quant_strategy else self.quant_strategy["v_proj-group_size"]
         )
+        print("Quanized v_proj weights to {} group_size: {}".format(self.v_proj.w_bits, self.v_proj.group_size))
         self.o_proj = QuantizeLinear(
             self.num_heads * self.head_dim,
             self.hidden_size,
             bias=False,
-            w_bits=self.w_bits,
+            w_bits=self.w_bits if "o_proj-n_bits" not in self.quant_strategy else self.quant_strategy["o_proj-n_bits"],
             a_bits=self.a_bits,
+            group_size = self.groupsize if "o_proj-group_size" not in self.quant_strategy else self.quant_strategy["o_proj-group_size"]
         )
+        print("Quanized o_proj weights to {} group_size: {}".format(self.o_proj.w_bits, self.o_proj.group_size))
         self.rotary_emb = LlamaRotaryEmbedding(
             self.head_dim, max_position_embeddings=self.max_position_embeddings
         )
@@ -581,9 +599,21 @@ class LlamaModel(LlamaPreTrainedModel):
         self.embed_tokens = nn.Embedding(
             config.vocab_size, config.hidden_size, self.padding_idx
         )
-        self.layers = nn.ModuleList(
-            [LlamaDecoderLayer(config) for _ in range(config.num_hidden_layers)]
-        )
+        decode_layers = []
+        import copy
+        toy_config = copy.deepcopy(config)
+        for layer_idx in range(config.num_hidden_layers):
+            if str(layer_idx) in config.quant_strategy:
+                print("layer_idx: ",layer_idx)
+                toy_config.quant_strategy = config.quant_strategy[str(layer_idx)]
+            print("Initializing Decoder Layer {}".format(layer_idx))
+            decode_layers.append(LlamaDecoderLayer(toy_config)) 
+            print("*"*50)
+        # self.layers = nn.ModuleList(
+        #     [LlamaDecoderLayer(config) for _ in range(config.num_hidden_layers)]
+        # )
+            
+        self.layers = nn.ModuleList(decode_layers)
 
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 

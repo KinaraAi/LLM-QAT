@@ -97,6 +97,8 @@ class LlamaConfig(PretrainedConfig):
         tie_word_embeddings=False,
         w_bits=32,
         a_bits=32,
+        quant_strategy = {},
+        group_size = -1,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -111,6 +113,8 @@ class LlamaConfig(PretrainedConfig):
         self.w_bits = w_bits
         self.a_bits = a_bits
         self.use_cache = use_cache
+        self.quant_strategy = quant_strategy
+        self.group_size = group_size
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,

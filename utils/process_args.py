@@ -40,6 +40,15 @@ class ModelArguments:
         default=32,
         metadata={"help": "KV_cache quantization bits."},
     )
+    w_groupsize: Optional[int] = field(
+        default=-1,
+        metadata={
+            "help": "#Groupsize to use for quantization; use -1 for evaluating base model"
+        },
+    )
+    quant_strategy_path: str = field(
+        default=None, metadata={"help": "path of the having quantization strategy"}
+    )
 
 
 @dataclass
