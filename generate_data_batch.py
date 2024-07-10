@@ -14,15 +14,14 @@ import os
 i_start = int(sys.argv[1])
 j_start = int(sys.argv[2]) 
 batch = int(sys.argv[3])
-device = torch.device("cuda:1") if i_start % 2 else torch.device("cuda:0")
-# device_map = "cuda:0" if i_start%2 else "cuda:1"
+
 print("Loading tokenizer")
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen1.5-7B",trust_remote_code=True)
 print("Tokenizer loaded!")
 print("Loading model")
 model = AutoModelForCausalLM.from_pretrained(
     "Qwen/Qwen1.5-7B",
-    device_map=f"cuda:{i_start%2}",
+    device_map=f"auto",
     torch_dtype="auto")
 # model = model.cuda()
 print("Model loaded!")
@@ -47,7 +46,7 @@ for j in [j_start]:
             int(i_start) * n_vocab + inner_loop, (int(i_start) + 1) * n_vocab,
             batch):
         lids = [[k] for k in range(i, i + batch)]
-        input_ids = torch.tensor(lids).cuda(device)
+        input_ids = torch.tensor(lids).to(model.device)
         # breakpoint()
         print("generating", i)
         outputs1 = model.generate(input_ids, do_sample=False, max_new_tokens=j)
